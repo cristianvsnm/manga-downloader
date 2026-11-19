@@ -2,12 +2,13 @@ import os
 import sys
 import re
 import json
+from collections import deque
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import time
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from threading import Lock
 
 try:
@@ -25,70 +26,25 @@ except ImportError:
     NoSuchWindowException = Exception
 
 
-def load_config():
-    config_path = 'config.json'
-    default_config = {
-        "timeout": 60,
-        "retry_attempts": 5,
-        "retry_delay": 2,
-        "delay_between_chapters": 2,
-        "delay_between_volumes": 3,
-        "output_dir": "downloads",
-        "selenium_wait_time": 30,
-        "selenium_extra_wait": 3,
-        "parallel_tomos": 1,
-        "parallel_chapters": 1,
-        "force_redownload": False
-    }
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                user_config = json.load(f)
-                default_config.update(user_config)
-        except:
-            pass
-    return default_config
+
+
+from manga_downloader.config import load_config
+from manga_downloader.metadata import save_metadata as _save_metadata_central
+from manga_downloader.paths import get_resource_path
+
+TOMOSMANGA_OUTPUT_FOLDER = 'tomosmanga'
+
+
+def get_tomosmanga_output_dir(output_dir):
+    normalized_output_dir = os.path.normpath(output_dir)
+    if os.path.basename(normalized_output_dir).lower() == TOMOSMANGA_OUTPUT_FOLDER:
+        return output_dir
+    return os.path.join(output_dir, TOMOSMANGA_OUTPUT_FOLDER)
 
 
 def save_metadata(manga_title, volumes, output_dir):
-    metadata = {
-        'manga_title': manga_title,
-        'url': '',
-        'volumes': []
-    }
-    metadata['_source_type'] = 'tomosmanga'
-    for volume in volumes:
-        if 'chapters' in volume:
-            volume_data = {
-                'name': volume['name'],
-                'tomo_number': re.search(r'(\d+)', volume['name']).group(1) if re.search(r'(\d+)', volume['name']) else "1",
-                'chapters': []
-            }
-            for chapter in volume['chapters']:
-                volume_data['chapters'].append({
-                    'name': chapter['name'],
-                    'url': chapter['url']
-                })
-            metadata['volumes'].append(volume_data)
-        else:
-            volume_data = {
-                'name': volume['name'],
-                'tomo_number': re.search(r'(\d+)', volume['name']).group(1) if re.search(r'(\d+)', volume['name']) else "1",
-                'chapters': [{
-                    'name': volume['name'],
-                    'url': volume.get('url', '')
-                }]
-            }
-            metadata['volumes'].append(volume_data)
-    safe_manga_title = re.sub(r'[<>:"/\\|?*]', '_', manga_title)
-    manga_dir = os.path.join(output_dir, safe_manga_title)
-    os.makedirs(manga_dir, exist_ok=True)
-    metadata_path = os.path.join(manga_dir, 'manga_metadata.json')
-    with open(metadata_path, 'w', encoding='utf-8') as f:
-        json.dump(metadata, f, ensure_ascii=False, indent=2)
-    title_path = os.path.join(manga_dir, 'manga_title.txt')
-    with open(title_path, 'w', encoding='utf-8') as f:
-        f.write(manga_title)
+    output_dir = get_tomosmanga_output_dir(output_dir)
+    return _save_metadata_central('tomosmanga', manga_title, volumes, output_dir)
 
 
 class TomosMangaDownloader:
@@ -124,8 +80,7 @@ class TomosMangaDownloader:
             html = self.get_page_selenium(url)
             if html:
                 try:
-                    script_dir = os.path.dirname(os.path.abspath(__file__))
-                    debug_file = os.path.join(script_dir, 'resources', 'debug', 'debug_html_tomosmanga.html')
+                    debug_file = get_resource_path('debug', 'debug_html_tomosmanga.html')
                     with open(debug_file, 'w', encoding='utf-8') as f:
                         f.write(html)
                     print(f"[TomosManga] HTML guardado en: {debug_file}")
@@ -139,8 +94,7 @@ class TomosMangaDownloader:
             response.raise_for_status()
             html = response.text
             try:
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                debug_file = os.path.join(script_dir, 'resources', 'debug', 'debug_html_tomosmanga.html')
+                debug_file = get_resource_path('debug', 'debug_html_tomosmanga.html')
                 with open(debug_file, 'w', encoding='utf-8') as f:
                     f.write(html)
                 print(f"[TomosManga] HTML guardado en: {debug_file}")
@@ -335,8 +289,7 @@ class TomosMangaDownloader:
                 return None
             
             try:
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                debug_file = os.path.join(script_dir, 'resources', 'debug', 'debug_html_ouo_io.html')
+                debug_file = get_resource_path('debug', 'debug_html_ouo_io.html')
                 with open(debug_file, 'w', encoding='utf-8') as f:
                     f.write(driver.page_source)
                 print(f"[TomosManga] HTML de ouo.io guardado en: {debug_file}")
@@ -859,8 +812,7 @@ class TomosMangaDownloader:
                 try:
                     print(f"[TomosManga] URL actual en navegador: {driver.current_url}")
                     try:
-                        script_dir = os.path.dirname(os.path.abspath(__file__))
-                        debug_file = os.path.join(script_dir, 'resources', 'debug', 'debug_html_ouo_io_error.html')
+                        debug_file = get_resource_path('debug', 'debug_html_ouo_io_error.html')
                         with open(debug_file, 'w', encoding='utf-8') as f:
                             f.write(driver.page_source)
                         print(f"[TomosManga] HTML de error guardado en: {debug_file}")
@@ -1171,8 +1123,7 @@ class TomosMangaDownloader:
                                 return None
             
             try:
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                debug_file = os.path.join(script_dir, 'resources', 'debug', 'debug_html_fireload.html')
+                debug_file = get_resource_path('debug', 'debug_html_fireload.html')
                 with open(debug_file, 'w', encoding='utf-8') as f:
                     f.write(driver.page_source)
                 print(f"[TomosManga] HTML de fireload guardado en: {debug_file}")
@@ -1246,6 +1197,34 @@ class TomosMangaDownloader:
             print(f"[TomosManga ERROR] Traceback: {traceback.format_exc()}")
             return None
     
+    def _is_temporary_download_file(self, filename):
+        lower_name = filename.lower()
+        return lower_name.endswith('.tmp') or lower_name.endswith('.crdownload') or lower_name.endswith('.part')
+
+    def _build_completed_download_name(self, filename, download_url):
+        final_name = os.path.basename(filename)
+        for suffix in ('.crdownload', '.tmp', '.part'):
+            if final_name.lower().endswith(suffix):
+                final_name = final_name[:-len(suffix)]
+                break
+
+        lower_url = (download_url or '').lower()
+        expected_ext = ''
+        if '.rar' in lower_url:
+            expected_ext = '.rar'
+        elif '.zip' in lower_url:
+            expected_ext = '.zip'
+
+        if expected_ext and not final_name.lower().endswith(expected_ext):
+            final_name += expected_ext
+        return final_name
+
+    def _matches_expected_size(self, current_size, expected_size):
+        if not expected_size or expected_size <= 0:
+            return True
+        tolerance_bytes = max(int(expected_size * 0.02), 5 * 1024 * 1024)
+        return current_size + tolerance_bytes >= expected_size
+
     def download_file_with_selenium(self, driver, download_button, download_dir, expected_filename, total_size=None, chapter_name=None):
         if not driver or not download_button:
             print(f"[TomosManga ERROR] No hay navegador o botón disponible para descargar")
@@ -1414,10 +1393,12 @@ class TomosMangaDownloader:
             stable_count = 0
             temp_file = None
             max_stable_checks = 10
+            max_idle_seconds = max(int(self.config.get('download_idle_timeout', 90)), max_stable_checks)
             previous_sizes = []
             size_history_window = 10
             last_callback_time = 0
             callback_interval = 2
+            incomplete_logged = False
             
             pbar = None
             if total_size and total_size > 0:
@@ -1494,6 +1475,7 @@ class TomosMangaDownloader:
                                             
                                             last_size = file_size
                                             stable_count = 0
+                                            incomplete_logged = False
                                             if len(previous_sizes) >= size_history_window:
                                                 previous_sizes.pop(0)
                                             previous_sizes.append((waited, file_size))
@@ -1501,29 +1483,42 @@ class TomosMangaDownloader:
                                             stable_count += 1
                                         
                                         if stable_count >= max_stable_checks:
+                                            if not self._matches_expected_size(file_size, total_size):
+                                                if not incomplete_logged:
+                                                    current_mb = file_size / (1024 * 1024)
+                                                    expected_mb = (total_size / (1024 * 1024)) if total_size else 0
+                                                    print(f"[TomosManga] Descarga en pausa con archivo temporal incompleto: {current_mb:.2f} MB de {expected_mb:.2f} MB. Esperando mas tiempo...")
+                                                    incomplete_logged = True
+                                                if stable_count < max_idle_seconds:
+                                                    continue
+                                                if pbar:
+                                                    pbar.n = file_size
+                                                    pbar.refresh()
+                                                    pbar.close()
+                                                current_mb = file_size / (1024 * 1024)
+                                                expected_mb = (total_size / (1024 * 1024)) if total_size else 0
+                                                print(f"[TomosManga ERROR] Descarga incompleta detectada: {current_mb:.2f} MB de {expected_mb:.2f} MB. Se aborta para evitar guardar un archivo corrupto.")
+                                                return False
                                             if pbar:
-                                                pbar.n = total_size if total_size else file_size
+                                                pbar.n = file_size
                                                 pbar.refresh()
                                                 pbar.close()
-                                            base_name = os.path.basename(temp_file).rsplit('.', 1)[0]
-                                            if download_url:
-                                                if '.rar' in download_url.lower():
-                                                    final_name = base_name + '.rar'
-                                                elif '.zip' in download_url.lower():
-                                                    final_name = base_name + '.zip'
-                                                else:
-                                                    final_name = base_name + '.rar'
-                                            else:
-                                                final_name = base_name + '.rar'
+                                            final_name = self._build_completed_download_name(os.path.basename(temp_file), download_url)
                                             final_path = os.path.join(download_dir, final_name)
                                             if not os.path.exists(final_path):
                                                 os.rename(temp_file, final_path)
                                                 print(f"[TomosManga] ✓ Archivo completado y renombrado: {final_name} ({file_size / (1024 * 1024):.2f} MB)")
                                                 return final_path
+                                            return final_path
                                     else:
                                         downloaded_file = filepath
+                                        if not self._matches_expected_size(file_size, total_size):
+                                            current_mb = file_size / (1024 * 1024)
+                                            expected_mb = (total_size / (1024 * 1024)) if total_size else 0
+                                            print(f"[TomosManga ERROR] El archivo final es mas pequeno de lo esperado: {current_mb:.2f} MB de {expected_mb:.2f} MB")
+                                            return False
                                         if pbar:
-                                            pbar.n = total_size if total_size else file_size
+                                            pbar.n = file_size
                                             pbar.refresh()
                                             pbar.close()
                                         print(f"[TomosManga] ✓ Archivo descargado encontrado: {filename} ({file_size / (1024 * 1024):.2f} MB)")
@@ -1564,22 +1559,30 @@ class TomosMangaDownloader:
                                 previous_sizes.pop(0)
                             previous_sizes.append((waited, current_size))
                             stable_count = 0
+                            incomplete_logged = False
                         elif current_size > 0 and current_size == last_size:
                             if stable_count >= max_stable_checks:
+                                if not self._matches_expected_size(current_size, total_size):
+                                    if not incomplete_logged:
+                                        current_mb = current_size / (1024 * 1024)
+                                        expected_mb = (total_size / (1024 * 1024)) if total_size else 0
+                                        print(f"[TomosManga] Descarga en pausa con archivo temporal incompleto: {current_mb:.2f} MB de {expected_mb:.2f} MB. Esperando mas tiempo...")
+                                        incomplete_logged = True
+                                    if stable_count < max_idle_seconds:
+                                        continue
+                                    if pbar:
+                                        pbar.n = current_size
+                                        pbar.refresh()
+                                        pbar.close()
+                                    current_mb = current_size / (1024 * 1024)
+                                    expected_mb = (total_size / (1024 * 1024)) if total_size else 0
+                                    print(f"[TomosManga ERROR] Descarga incompleta detectada: {current_mb:.2f} MB de {expected_mb:.2f} MB. Se aborta para evitar guardar un archivo corrupto.")
+                                    return False
                                 if pbar:
-                                    pbar.n = total_size if total_size else current_size
+                                    pbar.n = current_size
                                     pbar.refresh()
                                     pbar.close()
-                                base_name = os.path.basename(temp_file).rsplit('.', 1)[0]
-                                if download_url:
-                                    if '.rar' in download_url.lower():
-                                        final_name = base_name + '.rar'
-                                    elif '.zip' in download_url.lower():
-                                        final_name = base_name + '.zip'
-                                    else:
-                                        final_name = base_name + '.rar'
-                                else:
-                                    final_name = base_name + '.rar'
+                                final_name = self._build_completed_download_name(os.path.basename(temp_file), download_url)
                                 final_path = os.path.join(download_dir, final_name)
                                 if not os.path.exists(final_path):
                                     os.rename(temp_file, final_path)
@@ -1980,6 +1983,130 @@ class TomosMangaDownloader:
                         pass
         
         return fireload_data
+
+    def _close_fireload_driver(self, fireload_data):
+        if fireload_data and fireload_data.get('driver'):
+            try:
+                fireload_data['driver'].quit()
+            except:
+                pass
+
+    def _build_failed_volume_result(self, volume):
+        return {
+            'chapter_name': volume.get('name', 'Tomo'),
+            'downloaded': 0,
+            'total': 1
+        }
+
+    def download_volumes_keep_filled(self, volumes, manga_title, output_dir, max_downloads=None, prefetch_size=None):
+        if not volumes:
+            return {'dir': None, 'completed_count': 0, 'failed_chapters': []}
+
+        output_dir = get_tomosmanga_output_dir(output_dir)
+        safe_manga_title = re.sub(r'[<>:"/\\|?*]', '_', manga_title)
+        manga_dir = os.path.join(output_dir, safe_manga_title)
+        os.makedirs(manga_dir, exist_ok=True)
+
+        total_volumes = len(volumes)
+        max_downloads = max(1, int(max_downloads or self.config.get('parallel_tomos', 1)))
+        prefetch_size = max(1, int(prefetch_size or min(2, max_downloads)))
+        resolve_workers = min(prefetch_size, total_volumes)
+
+        with self.print_lock:
+            print(f"[TomosManga] Descargando con {max_downloads} slots fijos y prefetch {prefetch_size}")
+
+        next_volume_idx = 0
+        ready_queue = deque()
+        active_resolves = {}
+        active_downloads = {}
+        failed_chapters = []
+        completed_count = 0
+
+        def submit_resolves(resolve_executor):
+            nonlocal next_volume_idx
+            while (
+                not self.cancelled
+                and next_volume_idx < total_volumes
+                and len(active_resolves) + len(ready_queue) < prefetch_size
+            ):
+                volume = volumes[next_volume_idx]
+                idx = next_volume_idx + 1
+                future = resolve_executor.submit(self._get_single_fireload_url, volume, idx, total_volumes)
+                active_resolves[future] = (next_volume_idx, volume)
+                next_volume_idx += 1
+
+        def submit_downloads(download_executor):
+            while ready_queue and not self.cancelled and len(active_downloads) < max_downloads:
+                idx, volume, fireload_data = ready_queue.popleft()
+                future = download_executor.submit(self.download_chapter, volume['name'], fireload_data, manga_dir)
+                active_downloads[future] = (idx, volume, fireload_data)
+
+        with ThreadPoolExecutor(max_workers=resolve_workers) as resolve_executor, ThreadPoolExecutor(max_workers=max_downloads) as download_executor:
+            submit_resolves(resolve_executor)
+
+            while not self.cancelled and (next_volume_idx < total_volumes or active_resolves or ready_queue or active_downloads):
+                submit_downloads(download_executor)
+                submit_resolves(resolve_executor)
+
+                wait_targets = list(active_resolves.keys()) + list(active_downloads.keys())
+                if not wait_targets:
+                    break
+
+                done, _ = wait(wait_targets, return_when=FIRST_COMPLETED)
+
+                for future in done:
+                    if future in active_resolves:
+                        idx, volume = active_resolves.pop(future)
+                        try:
+                            fireload_data = future.result()
+                        except Exception as e:
+                            with self.print_lock:
+                                print(f"[TomosManga ERROR] Error al obtener URL para {volume['name']}: {e}")
+                            failed_chapters.append(self._build_failed_volume_result(volume))
+                            continue
+
+                        if (
+                            fireload_data
+                            and fireload_data.get('fireload_url')
+                            and fireload_data.get('driver')
+                            and fireload_data.get('download_button')
+                        ):
+                            ready_queue.append((idx, volume, fireload_data))
+                        else:
+                            self._close_fireload_driver(fireload_data)
+                            failed_chapters.append(self._build_failed_volume_result(volume))
+                    elif future in active_downloads:
+                        idx, volume, fireload_data = active_downloads.pop(future)
+                        try:
+                            downloaded, total, success, failed = future.result()
+                        except Exception as e:
+                            with self.print_lock:
+                                print(f"[TomosManga ERROR] Error al descargar {volume['name']}: {e}")
+                            failed_chapters.append(self._build_failed_volume_result(volume))
+                            continue
+
+                        if failed or success == 0:
+                            failed_chapters.append(self._build_failed_volume_result(volume))
+                        else:
+                            completed_count += 1
+                            with self.print_lock:
+                                print(f"[TomosManga] Tomo completado ({completed_count}/{total_volumes}): {volume['name']}")
+
+        for future in list(active_resolves.keys()):
+            try:
+                self._close_fireload_driver(future.result())
+            except Exception:
+                pass
+
+        if self.cancelled:
+            for _, _, fireload_data in ready_queue:
+                self._close_fireload_driver(fireload_data)
+
+        return {
+            'dir': manga_dir if completed_count > 0 else None,
+            'completed_count': completed_count,
+            'failed_chapters': failed_chapters
+        }
     
     def download_chapter(self, chapter_name, fireload_data, output_dir):
         if self.cancelled:
@@ -2005,12 +2132,43 @@ class TomosMangaDownloader:
         
         driver = fireload_data['driver']
         download_button = fireload_data['download_button']
+        expected_size_bytes = fireload_data.get('file_size')
         
         url_ext = '.zip'
         archive_path = os.path.join(output_dir, f"{safe_chapter_name}{url_ext}")
-        
+
         if os.path.exists(archive_path) and not self.config.get('force_redownload', False):
-            file_size = os.path.getsize(archive_path) / (1024 * 1024)
+            existing_size_bytes = os.path.getsize(archive_path)
+            if self._matches_expected_size(existing_size_bytes, expected_size_bytes):
+                existing_size_mb = existing_size_bytes / (1024 * 1024)
+                print(f"[TomosManga] Archivo ya existe: {archive_path} ({existing_size_mb:.2f} MB)")
+                if driver:
+                    try:
+                        driver.quit()
+                    except:
+                        pass
+                return ([archive_path], 1, 1, [])
+
+            existing_size_mb = existing_size_bytes / (1024 * 1024)
+            expected_size_mb = (expected_size_bytes / (1024 * 1024)) if expected_size_bytes else 0
+            print(f"[TomosManga] Archivo existente incompleto, se volvera a descargar: {existing_size_mb:.2f} MB de {expected_size_mb:.2f} MB")
+            try:
+                os.remove(archive_path)
+            except Exception as e:
+                print(f"[TomosManga ADVERTENCIA] No se pudo eliminar el archivo incompleto: {e}")
+        
+        if False and os.path.exists(archive_path) and not self.config.get('force_redownload', False):
+            existing_size_bytes = os.path.getsize(archive_path)
+            if not self._matches_expected_size(existing_size_bytes, expected_size_bytes):
+                existing_size_mb = existing_size_bytes / (1024 * 1024)
+                expected_size_mb = (expected_size_bytes / (1024 * 1024)) if expected_size_bytes else 0
+                print(f"[TomosManga] Archivo existente incompleto, se volvera a descargar: {existing_size_mb:.2f} MB de {expected_size_mb:.2f} MB")
+                try:
+                    os.remove(archive_path)
+                except Exception as e:
+                    print(f"[TomosManga ADVERTENCIA] No se pudo eliminar el archivo incompleto: {e}")
+            else:
+                file_size = existing_size_bytes / (1024 * 1024)
             print(f"[TomosManga] ✓ Archivo ya existe: {archive_path} ({file_size:.2f} MB)")
             if driver:
                 try:
@@ -2023,8 +2181,15 @@ class TomosMangaDownloader:
             os.path.join(os.path.dirname(__file__), "downloads", "temp", safe_chapter_name)
         )
         os.makedirs(temp_download_dir, exist_ok=True)
+        for temp_name in os.listdir(temp_download_dir):
+            temp_path = os.path.join(temp_download_dir, temp_name)
+            if os.path.isfile(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception as e:
+                    print(f"[TomosManga ADVERTENCIA] No se pudo limpiar archivo temporal '{temp_name}': {e}")
         
-        file_size = fireload_data.get('file_size')
+        file_size = expected_size_bytes
         if file_size:
             size_mb = file_size / (1024 * 1024)
             print(f"[{safe_chapter_name}] Iniciando descarga ({size_mb:.2f} MB)...")
@@ -2095,6 +2260,7 @@ class TomosMangaDownloader:
         chapter_name = volume.get('name', 'Tomo')
         chapter_url = volume['url']
         
+        output_dir = get_tomosmanga_output_dir(output_dir)
         safe_manga_title = re.sub(r'[<>:"/\\|?*]', '_', manga_title)
         manga_dir = os.path.join(output_dir, safe_manga_title)
         os.makedirs(manga_dir, exist_ok=True)
@@ -2218,12 +2384,12 @@ def main():
         print("Error: No se seleccionaron tomos")
         sys.exit(1)
     
-    output_dir = config['output_dir']
+    output_dir = get_tomosmanga_output_dir(config['output_dir'])
     safe_manga_title = re.sub(r'[<>:"/\\|?*]', '_', manga_title)
     manga_dir = os.path.join(output_dir, safe_manga_title)
     os.makedirs(manga_dir, exist_ok=True)
     
-    save_metadata(manga_title, [{'name': v['name'], 'chapters': [{'name': v['name'], 'url': v['url']}]} for v in volumes], manga_dir)
+    save_metadata(manga_title, [{'name': v['name'], 'chapters': [{'name': v['name'], 'url': v['url']}]} for v in volumes], output_dir)
     
     print(f"\n{'='*60}")
     print("OBTENIENDO URLs DE FIRELOAD")

@@ -1,6 +1,7 @@
 import os
 import glob
 from pathlib import Path
+from manga_downloader.paths import get_project_root
 
 def delete_001_images(manga_path):
     if not os.path.exists(manga_path):
@@ -59,8 +60,7 @@ def delete_001_images(manga_path):
     print(f"  Archivos eliminados: {deleted_count}")
 
 if __name__ == "__main__":
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    manga_path = os.path.join(script_dir, "downloads", "L.A.G")
+    manga_path = os.path.join(get_project_root(), "downloads", "L.A.G")
     
     print(f"Buscando imágenes '001' en: {manga_path}")
     print("=" * 60)

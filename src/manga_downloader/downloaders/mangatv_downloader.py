@@ -28,88 +28,14 @@ except ImportError:
     PIL_AVAILABLE = False
 
 
-def load_config():
-    config_path = 'config.json'
-    default_config = {
-        "timeout": 30,
-        "retry_attempts": 5,
-        "retry_delay": 2,
-        "delay_between_images": 0.1,
-        "delay_between_chapters": 0.5,
-        "delay_between_volumes": 1,
-        "min_file_size": 0,
-        "output_dir": "downloads",
-        "selenium_wait_time": 10,
-        "selenium_extra_wait": 2,
-        "parallel_tomos": 3,
-        "parallel_chapters": 2,
-        "parallel_images": 8,
-        "retry_failed_images": 5,
-        "force_redownload": False
-    }
-    
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                user_config = json.load(f)
-                default_config.update(user_config)
-        except:
-            pass
-    
-    return default_config
 
+
+from manga_downloader.config import load_config
+from manga_downloader.metadata import save_metadata as _save_metadata_central
+from manga_downloader.paths import get_resource_path
 
 def save_metadata(manga_title, volumes, output_dir, manga_type='manga', tomos_structure=None):
-    if manga_type == 'manhwa':
-        metadata = {
-            'manhwa_title': manga_title,
-            'url': '',
-            'volumes': []
-        }
-    else:
-        metadata = {
-            'manga_title': manga_title,
-            'url': '',
-            'volumes': []
-        }
-    
-    metadata['_source_type'] = 'mangatv'
-    metadata['_manga_type'] = manga_type
-    
-    if tomos_structure and manga_type == 'manga':
-        metadata['_tomos_structure'] = tomos_structure
-    
-    for volume in volumes:
-        volume_data = {
-            'name': volume['name'],
-            'tomo_number': re.search(r'(\d+)', volume['name']).group(1) if re.search(r'(\d+)', volume['name']) else "1",
-            'chapters': []
-        }
-        
-        for chapter in volume['chapters']:
-            volume_data['chapters'].append({
-                'name': chapter['name'],
-                'url': chapter['url']
-            })
-        
-        metadata['volumes'].append(volume_data)
-    
-    safe_manga_title = re.sub(r'[<>:"/\\|?*]', '_', manga_title)
-    manga_dir = os.path.join(output_dir, safe_manga_title)
-    os.makedirs(manga_dir, exist_ok=True)
-    
-    if manga_type == 'manhwa':
-        metadata_path = os.path.join(manga_dir, 'manhwa_metadata.json')
-        title_path = os.path.join(manga_dir, 'manhwa_title.txt')
-    else:
-        metadata_path = os.path.join(manga_dir, 'manga_metadata.json')
-        title_path = os.path.join(manga_dir, 'manga_title.txt')
-    
-    with open(metadata_path, 'w', encoding='utf-8') as f:
-        json.dump(metadata, f, ensure_ascii=False, indent=2)
-    
-    with open(title_path, 'w', encoding='utf-8') as f:
-        f.write(manga_title)
+    return _save_metadata_central('mangatv', manga_title, volumes, output_dir, manga_type=manga_type, tomos_structure=tomos_structure)
 
 
 class MangaTVDownloader:
@@ -254,8 +180,7 @@ class MangaTVDownloader:
         soup = BeautifulSoup(html_content, 'lxml')
         
         if debug:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            debug_file = os.path.join(script_dir, 'resources', 'debug', 'debug_html_mangatv.html')
+            debug_file = get_resource_path('debug', 'debug_html_mangatv.html')
             with open(debug_file, 'w', encoding='utf-8') as f:
                 f.write(html_content)
             print("\n=== MODO DEPURACIÓN ===")

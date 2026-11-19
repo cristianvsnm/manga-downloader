@@ -6,6 +6,7 @@ from pathlib import Path
 from collections import defaultdict
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from manga_downloader.paths import get_project_root
 
 try:
     from PIL import Image, ImageTk
@@ -25,8 +26,7 @@ class DeleteImagesGUI:
         self.root.title("Eliminar Imágenes por Contenido")
         self.root.geometry("1000x700")
         
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        default_downloads = os.path.join(script_dir, "downloads")
+        default_downloads = os.path.join(get_project_root(), "downloads")
         
         self.reference_image_paths = []
         self.manga_folder_path = tk.StringVar(value=default_downloads if os.path.exists(default_downloads) else "")
@@ -221,9 +221,8 @@ class DeleteImagesGUI:
             self.update_selected_preview()
     
     def select_manga_folder(self):
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        default_path = os.path.join(script_dir, "downloads")
-        initial_dir = default_path if os.path.exists(default_path) else script_dir
+        default_path = os.path.join(get_project_root(), "downloads")
+        initial_dir = default_path if os.path.exists(default_path) else get_project_root()
         
         folder_path = filedialog.askdirectory(title="Seleccionar Carpeta de Manga", initialdir=initial_dir)
         if folder_path:

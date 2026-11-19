@@ -218,7 +218,19 @@ class CBRGenerator:
             print(f"[ERROR] No se encontraron imágenes en: {images_dir}")
             return None
         
-        all_images.sort(key=lambda x: natural_sort_key(x[2]))
+        # Orden: primero por capítulo (carpeta) ascendente, luego por imagen (archivo) ascendente
+        # Ej: capitulo1/001, capitulo1/002, ..., capitulo2/001, capitulo2/002
+        def sort_key_chapter_then_image(item):
+            rel_path = item[2].replace('\\', '/')
+            parts = rel_path.split('/')
+            if len(parts) <= 1:
+                dir_part = ''
+                file_part = parts[0] if parts else ''
+            else:
+                dir_part = '/'.join(parts[:-1])
+                file_part = parts[-1]
+            return (natural_sort_key(dir_part), natural_sort_key(file_part))
+        all_images.sort(key=sort_key_chapter_then_image)
         
         def normalize_path_for_zip(rel_path):
             def replace_decimal_dot(text):
